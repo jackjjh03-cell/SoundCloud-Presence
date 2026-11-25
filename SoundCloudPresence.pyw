@@ -41,10 +41,13 @@ def playback_bounds(played_at, duration, offset=0):
 
 
 def playback_state(bounds, now_ms, show_progress, clear_at_end, grace):
-    if bounds is None: return False,None
+    # Discord may substitute its own elapsed counter if timestamps are absent.
+    # Preserve the real start/end pair even after the estimated song ends.
+    # Never invent a new start time for an old history entry.
+    if bounds is None: return bool(show_progress),None
     start,end=bounds
     if clear_at_end and now_ms>=end+grace*1000: return True,None
-    if show_progress and start<=now_ms<end: return False,{'start':start,'end':end}
+    if show_progress: return False,{'start':start,'end':end}
     return False,None
 
 
@@ -155,7 +158,7 @@ class LatestCommands:
 class Tester:
     def __init__(self, root):
         self.root = root
-        root.title('SoundCloud Presence | V0.27')
+        root.title('SoundCloud Presence | V0.28')
         root.geometry('900x850')
         root.minsize(760, 480)
         root.resizable(True, True)
@@ -334,7 +337,7 @@ class Tester:
         style.map('TNotebook.Tab',background=[('selected',panel)],foreground=[('selected',fg)])
         outer=ttk.Frame(self.root,padding=18); outer.pack(fill='both',expand=True)
         ttk.Label(outer,text='SoundCloud Presence',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(outer,text='V0.27  /  Account playback history → Discord',style='Muted.TLabel').pack(anchor='w',pady=(0,12))
+        ttk.Label(outer,text='V0.28  /  Account playback history → Discord',style='Muted.TLabel').pack(anchor='w',pady=(0,12))
         bar=ttk.Frame(outer); bar.pack(fill='x',pady=(0,12))
         ttk.Label(bar,textvariable=self.status,foreground=accent,wraplength=460).pack(side='left')
         ttk.Label(bar,textvariable=self.rpc_status,style='Muted.TLabel').pack(side='right')
@@ -446,7 +449,7 @@ class Tester:
         ttk.Checkbutton(timeline,text='Immediate end-of-track clearing (overrides inactivity below)',variable=self.clear_at_end).pack(anchor='w',pady=(12,0))
         r=ttk.Frame(timeline); r.pack(fill='x',pady=6)
         ttk.Label(r,text='End grace period',width=24).pack(side='left'); duration(r,self.end_grace,(0,10,20,30,60,120))
-        ttk.Label(timeline,text='If clearing is off, the last presence remains until a new track or manual update. A newly detected play restores the presence. Pauses and seeking on your phone cannot be detected.',style='Muted.TLabel',wraplength=630).pack(anchor='w',pady=8)
+        ttk.Label(timeline,text='With progress enabled, completed tracks keep their original full progress bar until the selected clearing action. Missing timing data clears the activity rather than starting a counter. Phone pauses and seeking cannot be detected.',style='Muted.TLabel',wraplength=630).pack(anchor='w',pady=8)
         heading(timeline,'Inactivity after estimated end')
         r=ttk.Frame(timeline); r.pack(fill='x',pady=3)
         ttk.Combobox(r,textvariable=self.inactive_mode,values=('Keep last song','Hide timer','Mark inactive','Clear presence'),state='readonly',width=22).pack(side='left')
@@ -454,7 +457,7 @@ class Tester:
         ttk.Label(r,text='Delay after estimated end',width=24).pack(side='left'); duration(r,self.inactive_delay,(0,15,30,60,300,900,3600))
         r=ttk.Frame(timeline); r.pack(fill='x',pady=3)
         ttk.Label(r,text='Inactive text',width=24).pack(side='left'); ttk.Entry(r,textvariable=self.inactive_label).pack(side='left',fill='x',expand=True,padx=8)
-        ttk.Label(timeline,text='Uses estimated song end, not actual pause. The existing clear-at-end option takes priority. New plays restore presence.',wraplength=650,style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(timeline,text='Uses estimated song end, not actual pause. Clear-at-end takes priority. With progress enabled, Hide timer clears the card instead (Discord may otherwise show its own timer). Mark inactive keeps the progress bar. New plays restore presence.',wraplength=650,style='Muted.TLabel').pack(anchor='w')
         buttons(timeline,[('Apply inactivity settings',self.apply_settings,True)])
         appearance=ttk.Frame(tabs,padding=12); tabs.add(appearance,text='Appearance')
         appearance_nav=ttk.Notebook(appearance); appearance_nav.pack(fill='both',expand=True)
@@ -693,7 +696,7 @@ class Tester:
             ts=self.timeline_state()[2] if self.current else ({'start':now-63000,'end':now+147000} if self.show_progress.get() else None)
             a=music_activity(current,self.activity_name.get(),self.title_as_name.get(),self.show_album.get(),self.show_art.get(),self.show_button.get(),ts,None if mode=='Basic music' else {k:v.get() for k,v in self.template_fields.items()})
             if mode=='Inactive music':
-                a.pop('timestamps',None); a['state']=self.inactive_label.get() or 'Listening inactive'
+                a['state']=self.inactive_label.get() or 'Listening inactive'
         dirty=self.layout_data()!={'enabled':self.applied_template is not None,'fields':self.saved_template}
         self.dirty_label.configure(text=('Unapplied changes' if dirty else 'Layout applied') if self.template_enabled.get() else 'Template disabled — preview only')
         key,title,artist,album,art,url,duration=current
@@ -1215,7 +1218,12 @@ class Tester:
         except ValueError: grace=30
         bounds=playback_bounds(self.current[0][1],self.current[6],offset)
         clear,timestamps=playback_state(bounds,int(time.time()*1000),self.show_progress.get(),self.clear_at_end.get(),grace)
-        if self.is_inactive(bounds) and self.inactive_mode.get()=='Clear presence': clear=True; timestamps=None
+        if self.is_inactive(bounds):
+            mode=self.inactive_mode.get()
+            # Hiding timestamps can make Discord display an elapsed counter.
+            # With progress enabled, clear instead of publishing an untimed card.
+            if mode=='Clear presence' or (mode=='Hide timer' and self.show_progress.get()):
+                clear=True; timestamps=None
         return bounds,clear,timestamps
 
     def is_inactive(self,bounds):
@@ -1261,7 +1269,7 @@ class Tester:
         inactive=self.is_inactive(bounds)
         activity=music_activity(self.current,self.activity_name.get().strip(),self.title_as_name.get(),self.show_album.get(),self.show_art.get(),self.show_button.get(),timestamps,self.applied_template)
         if inactive and self.inactive_mode.get()=='Mark inactive': activity['state']=(self.inactive_label.get().strip() or 'Listening inactive')[:128]
-        if inactive and self.inactive_mode.get() in ('Hide timer','Mark inactive'): activity.pop('timestamps',None)
+        if inactive and self.inactive_mode.get()=='Hide timer': activity.pop('timestamps',None)
         signature=(self.current[0],json.dumps(activity,sort_keys=True))
         if signature==self.requested_presence: return
         self.enqueue_presence('update',(activity,self.current[1],self.current[2]),signature)
@@ -1302,7 +1310,9 @@ class Tester:
                     activity,title,artist=data
                     payload={'cmd':'SET_ACTIVITY','args':{'pid':os.getpid(),'activity':activity},'nonce':str(uuid.uuid4())}
                     sent=time.monotonic()
-                    self.rpc_events.put(('info','Sending: '+title+' — '+artist+' | queue %.0f ms'%((sent-queued)*1000)))
+                    ts=activity.get('timestamps')
+                    timing=('progress start=%s end=%s'%(ts['start'],ts['end'])) if ts and 'start' in ts and 'end' in ts else 'no timestamps (progress disabled)'
+                    self.rpc_events.put(('info','Sending: '+title+' — '+artist+' | '+timing+' | queue %.0f ms'%((sent-queued)*1000)))
                     rpc.update(payload_override=payload)
                     self.rpc_events.put(('ack',(seq,sig,'Published: '+title+' — '+artist,queued,sent,time.monotonic(),detected)))
             except Exception as e:
