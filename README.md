@@ -2,7 +2,7 @@
 
 A lightweight Windows desktop application that displays your SoundCloud listening history as Discord Rich Presence, including tracks played on your phone. No phone app, browser extension or automated browser is required during normal operation.
 
-**Version:** 0.21 · **Status:** Experimental / unofficial
+**Version:** 0.21
 
 ## Features
 
