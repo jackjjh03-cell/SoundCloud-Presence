@@ -21,30 +21,8 @@ A lightweight Windows desktop application that displays your SoundCloud listenin
 
 - Windows, with Python 3.8 or newer and Tkinter installed. The project was developed for Python 3.8 on Windows 7; legacy OS and Discord client compatibility is not guaranteed.
 - A running Discord desktop client with activity sharing enabled.
-- A SoundCloud account and your own valid access token for music mode.
+- A SoundCloud account and your own valid access token for music.
 - Your own Discord developer application ID.
-
-## Installation
-
-Download the repository ZIP from GitHub (Code → Download ZIP), extract it, and open Command Prompt in the extracted folder.
-
-```cmd
-python -m pip install -r requirements.txt
-```
-
-For optional system tray support:
-
-```cmd
-python -m pip install -r requirements-tray.txt
-```
-
-Double-click `SoundCloudPresence.pyw`, or run:
-
-```cmd
-pythonw SoundCloudPresence.pyw
-```
-
-For troubleshooting startup problems, use `python SoundCloudPresence.pyw` instead to see console errors.
 
 ## First-time setup
 
