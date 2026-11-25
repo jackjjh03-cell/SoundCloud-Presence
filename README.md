@@ -114,5 +114,3 @@ Bug reports and suggestions are welcome. Include the application version, Python
 ## Disclaimer
 
 This is an independent, unofficial project, not affiliated with or endorsed by SoundCloud or Discord. Use only with accounts you are authorized to access and in accordance with the services' applicable terms. The undocumented endpoint can stop working at any time. No guarantee is made about account access or rate limits.
-
-See `LICENSE` for the proposed MIT license. Dependencies are distributed separately under their own licenses.
