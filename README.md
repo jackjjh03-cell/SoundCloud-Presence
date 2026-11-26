@@ -1,123 +1,142 @@
 SoundCloud Presence
-A lightweight Windows desktop application that displays your SoundCloud listening history as Discord Rich Presence, including tracks played on your phone. No phone app, browser extension or automated browser is required during normal operation.
+A lightweight Windows desktop application that displays your SoundCloud listening activity on Discord using Rich Presence. It works with tracks played across devices, including mobile playback, without requiring a phone app, browser extension or automated browser during normal use.
 
-Version: 0.27
+Version: 0.32
 Features
-- Automatically display song title, artist, album and artwork on Discord, with duplicate text removed.
-- Detect playback history changes across devices, including iPhone playback.
-- Estimated playback progress with an adjustable offset and optional end-of-track clearing.
-- Configurable inactivity handling: keep the last song, hide the timer, display custom inactive text or clear the presence after a selected delay.
-- Customizable music presence templates with text variables, conditional formatting, artwork, fallback images, tooltips and up to two link buttons.
-- Live Discord-style preview, character counters, saved music layouts and template import/export.
-- Adjustable polling intervals, manual refresh and pause/resume, with optional adaptive polling, rolling request counters, configurable request budget and rate-limit cooldowns.
-- Automatic publishing when new playback information is detected, with duplicate payload suppression, manual publishing and reconnection support.
-- Separate custom presence mode with configurable text, activity type, images, link button, elapsed timer and saved presets.
-- Resizable dark desktop interface, optional system tray support and automatic Discord reconnection.
-- Encrypted local access-token storage using Windows DPAPI, expiration monitoring and warnings.
-- Filterable diagnostic logs, configurable log retention in memory, optional persistent logging, settings export and optional performance optimizations. No automatic Windows startup registration.
+- Automatic song title, artist, album and artwork updates on Discord.
+- Cross-device listening history detection, including iPhone playback.
+- Estimated playback progress with an adjustable start offset and configurable inactivity handling.
+- Customizable music layouts with formatting variables, conditional text, duplicate metadata filtering, artwork, tooltips and up to two link buttons.
+- Live Discord-style preview, character counters, saved layouts and template import/export.
+- Adjustable polling intervals, adaptive polling, manual refresh, request counters, a configurable request budget and rate-limit handling.
+- Automatic publishing when playback information changes, with redundant updates suppressed.
+- Independent custom presence mode with configurable activity types, text, images, a link button, an optional timer and saved presets.
+- Resizable dark interface, optional system tray support and automatic Discord reconnection.
+- Encrypted local token storage, token expiration monitoring, filterable logs, settings export and configurable performance options.
 Requirements
-- Windows, with Python 3.8 or newer and Tkinter installed. The project was developed for Python 3.8 on Windows 7; legacy OS and Discord client compatibility is not guaranteed.
-- A running Discord desktop client with activity sharing enabled.
-- A SoundCloud account and your own valid access token for music.
-- Your own Discord developer application ID. The same ID can be used for music and custom presence.
+- Windows with Python 3.8 or newer and Tkinter installed.
+- Discord desktop client with activity sharing enabled.
+- A SoundCloud account and valid access token for music presence.
+- A Discord developer application ID. The same ID can be used for music and custom presence.
+The application was developed using Python 3.8 on Windows 7. Compatibility with legacy operating systems and Discord clients is not guaranteed.
 Installation
 1. Download and extract the project files into a folder of your choice.
-2. Install Python if necessary, including Tcl/Tk support, and ensure python is available on your PATH.
-3. Double-click Install.bat to install the minimum required dependency, PyPresence.
-4. Double-click SoundCloudPresence.pyw to launch the application. If using a version-numbered .pyw file, launch that file instead.
+2. Install Python if necessary, including Tcl/Tk support, and make sure Python is available on your PATH.
+3. Run Install.bat to install the required dependency.
+4. Launch SoundCloudPresence.pyw, or the version-numbered .pyw file included in your release.
 Alternatively, open Command Prompt in the project folder and run:
 python -m pip install -r requirements.txt
-For optional system tray support, install the additional dependencies:
+For optional system tray support:
 python -m pip install -r requirements-tray.txt
-The minimum dependency is pypresence==4.3.0. Tray support additionally uses pystray==0.19.5 and Pillow==9.5.0. The installer does not install optional tray packages or register the application for Windows startup.
+The required dependency is pypresence==4.3.0. System tray support also uses pystray==0.19.5 and Pillow==9.5.0. The installer only installs the required dependency and does not register the application for Windows startup.
 First-time setup
 Discord
 1. Open the Discord Developer Portal.
-2. Create a new application and copy its Application ID under General Information. A bot token or client secret is not needed.
-3. Open the Accounts tab in SoundCloud Presence and enter the ID under Discord application.
+2. Create an application and copy its Application ID from General Information. A bot token or client secret is not required.
+3. Open Accounts in SoundCloud Presence and enter the ID under Discord application.
 4. Open the Discord desktop client and enable activity sharing in its privacy settings.
-5. In Accounts, click Connect / Switch. Use Save preferences to save your connection preferences.
+5. Select Connect / Switch. Use Save preferences to save your connection preferences.
 SoundCloud
-1. Open the Accounts tab and select Help: Get token for the current manual authentication instructions.
-2. Sign into your own SoundCloud account using your normal browser and follow the in-app instructions to obtain your current access token. Never share credentials or copy the refresh token.
-3. Enter the access token in Accounts, optionally enable Remember verified token securely on this PC, and click Connect / Save.
-4. In Now playing, click Start / Resume.
-The application checks the token's embedded expiration timestamp when available. Access tokens must be renewed manually; the program does not automatically sign in or refresh credentials. Firefox can be closed while a valid token is in use.
-Configuration
+1. Open Accounts and select Help: Get token for authentication instructions.
+2. Sign into your own SoundCloud account in your browser and follow the in-app instructions to obtain your access token.
+3. Enter the token, optionally enable Remember verified token securely on this PC, and select Connect / Save.
+4. Open Now playing and select Start / Resume.
+Access tokens must be renewed manually when they expire. The application monitors the token's expiration timestamp when available and does not automate browser sign-in or token renewal. The browser can be closed while a valid token is in use. Never share your access token or refresh token.
+Application overview
 Tab	Purpose
-Now playing	Current song, estimated playback, start/pause polling, refresh, publish or clear activity, switch modes
-Accounts	SoundCloud authentication, token expiration, Discord application ID, connection and reconnection preferences
-Appearance	Basic music layout, custom templates, live preview, artwork, buttons and saved layouts
-Custom presence	Independent custom activity editor, images, link, timer and saved presets
-Settings	Playback, inactivity, polling, request protection, desktop behavior, diagnostics and performance
-Activity log	Filterable request results, errors, Discord acknowledgment timings and logging preferences
+Now playing	Current track, estimated playback, polling, manual refresh, publishing and mode switching
+Accounts	SoundCloud authentication, Discord application ID and connection preferences
+Appearance	Music layouts, templates, live preview, artwork, buttons and saved presets
+Custom presence	Custom activity editor and saved presets
+Settings	Playback, inactivity, polling, request protection, desktop behavior and performance
+Activity log	Request results, connection events, errors, timings and logging preferences
 
 
 Appearance and templates
-Use Appearance > Basic layout for simple display options, including the activity name, artwork, album information and SoundCloud link button.
+Appearance > Basic layout contains simple display options for the activity name, album information, artwork and SoundCloud link button.
 
-For more control, open Appearance > Template editor. You can customize the activity name, first and second lines, Discord status text, large and small images, hover text, fallback artwork and two optional link buttons. Enable Use custom music template and select Apply template to publish the layout. The preview updates as you edit without publishing those edits. It can show music, basic music, inactive music or custom presence, using the current track or sample metadata. Artwork is represented by placeholders, and Discord may display the final activity differently on desktop and mobile.
+For more control, use Appearance > Template editor. The editor supports a built-in layout and custom templates with configurable activity names, body text, status text, large and small images, hover text, fallback artwork and up to two link buttons.
 
-The following variables can be used in template fields:
+The built-in music layout uses the song title in both the activity heading and the main text, the artist on the secondary line and the album as cover artwork text. Duplicate album information is omitted. Discord may display the cover text as an additional line or as an artwork tooltip, depending on the client.
+
+Select the premade layout and click Load layout, or create your own. Enable Use custom music template and select Apply template to publish your changes. The live preview updates while editing without sending changes to Discord. It uses artwork placeholders and supports music, inactive music and custom presence previews.
+Template variables
 Variable	Value
 %title%	Song title
 %artist%	Artist name
 %album%	Album name
-%distinct_album%	Album name, only when different from the song title and artist
-%duration%	Song duration, formatted as minutes and seconds
+%distinct_album%	Album name when different from the title and artist
+%duration%	Track duration in minutes and seconds
 %artwork%	Track artwork URL
 %url%	Track link
 %app%	Configured activity name
 
 
-Variables can be combined with normal text. Optional groups in square brackets are omitted when any variable inside the group is empty. For example, %artist%[ - %distinct_album%] only includes the separator and album when there is a distinct album name. Identical music activity text is displayed once, with the higher-priority field retained.
+Variables can be combined with normal text. Optional groups in square brackets are included only when all variables in the group have values. For example:
+%artist%[ - %distinct_album%]
+This displays the artist and, when available, a distinct album name with a separator. Duplicate filtering avoids redundant text while allowing the song title to appear in both the heading and the body of the activity card.
 
-Music layouts can be saved, loaded, renamed, duplicated, deleted, imported or exported as JSON files. Layout exports contain appearance settings, not account credentials. Review custom text and URLs before sharing them. Use Revert to discard unapplied changes or Restore defaults to restore the default template fields.
+Layouts can be saved, loaded, renamed, duplicated, deleted, imported or exported as JSON files. Layout exports do not include account credentials. Revert discards unapplied changes, and Restore defaults restores the default template fields.
 Playback and inactivity
-Open Settings > Playback & inactivity to configure the estimated playback progress bar, start offset and end-of-track behavior.
+Open Settings > Playback & inactivity to configure the progress bar, start offset, end-of-track clearing and inactivity behavior.
 
-The inactivity delay is measured from the estimated end of the song, not the moment playback is paused. You can enter a custom delay in seconds, minutes or hours.
+The progress bar is estimated from the listening history timestamp and song duration. Completed tracks retain their original progress bar until a configured clearing action occurs. When progress is enabled and usable timing information is unavailable, the activity is cleared instead of publishing a standalone elapsed timer.
+
+Inactivity is measured from the estimated end of the song. The delay can be entered in seconds, minutes or hours.
 Inactivity action	Behavior
 Keep last song	Retain the last displayed activity
-Hide timer	Remove the playback timestamps while retaining the song information
-Mark inactive	Remove the timer and display customizable inactive text
-Clear presence	Remove the music activity from Discord
+Hide timer	Remove timestamps when progress is disabled; clear the activity when progress is enabled
+Mark inactive	Display custom inactive text while retaining the progress bar if enabled
+Clear presence	Remove the activity from Discord
 
 
-If immediate end-of-track clearing is enabled, its grace period takes priority for clearing. Newly detected playback restores the normal music presence. Inactivity is an estimate; it does not indicate whether the SoundCloud player is actually paused.
+Enable inactivity actions controls both inactivity handling and end-of-track clearing. Disabling it retains the configured preferences. When enabled, end-of-track clearing takes priority once its grace period expires. Newly detected playback restores normal music presence.
+
+SoundCloud history does not reliably identify when a song is paused, stopped or skipped within the player, so inactivity is an estimate rather than a live playback status.
+Polling and request management
+The default automatic polling interval is 20 seconds, with adaptive polling enabled and a local rolling 24-hour request budget of 8,640 requests. Polling intervals and adaptive behavior can be customized in Settings.
+
+Refresh now requests the latest history entry independently of the automatic polling schedule, including when automatic polling is paused. Manual requests count toward usage but are not limited by the automatic polling budget or interval. If a request is already running, one manual refresh is queued. Server cooldowns and access restrictions still apply.
+
+Publish latest republishes the detected track without making an additional SoundCloud request.
+
+The application uses the undocumented api-v2.soundcloud.com/me/play-history/tracks?limit=1 endpoint. History entries may arrive after a delay, and faster polling does not necessarily provide faster playback detection. The endpoint's server-side rate limit is unknown; the local request budget is not a verified SoundCloud quota. Reduce request frequency if rate limits occur and respect all cooldowns and access restrictions.
 Custom presence
-The Custom presence tab can be edited without interrupting music presence. Select Enable custom mode, or select Switch to custom presence from Now playing, and accept the confirmation. SoundCloud polling is suspended in that mode. Configure your activity and select Publish custom. You can save presets and reuse them later. Select Return to music to switch back.
+The Custom presence tab can be edited without interrupting music presence. Select Enable custom mode or switch modes from Now playing, configure the activity and select Publish custom.
 
-Images must be public HTTPS URLs or asset keys from your Discord application; local file paths are not supported by Discord RPC. Custom presence has its own optional elapsed timer, separate from the estimated music progress bar.
+SoundCloud polling is suspended while custom mode is active. Custom activities support configurable text, activity types, large and small images, tooltips, a link button, an optional elapsed timer and saved presets. Select Return to music to restore music mode.
+
+Images must be public HTTPS URLs or asset keys from your Discord developer application. Local image file paths are not supported by Discord RPC.
 Logging and performance
-The Activity log can be filtered by new tracks, unchanged polls, Discord, account messages, errors and other messages. These filters affect the on-screen log only. Disable Hide unchanged polls if you want to record every successful poll. Persistent file logging and the number of entries retained in memory can also be configured.
+The Activity log includes SoundCloud request results, track changes, Discord connection events, acknowledgment timings and errors. Messages can be filtered by category. Disable Hide unchanged polls to include unchanged successful requests.
 
-Optional performance settings are available under Settings > Performance. Optimizations for skipping unchanged GUI values and repeated inactive Discord checks are disabled by default. Preview rendering can be restricted to when Appearance is visible. The normal polling and publishing behavior does not require experimental optimizations.
-Polling and limitations
-The program uses the undocumented api-v2.soundcloud.com/me/play-history/tracks?limit=1 endpoint. It is not a live playback API. Track changes may appear after a delay, and pause, stop, seeking and actual playback position cannot be detected reliably. The progress bar is estimated using the history timestamp and duration. Discord controls the final activity layout and may render it differently on desktop and mobile.
-
-The default polling interval is 20 seconds, adaptive polling is enabled, and the default local rolling 24-hour budget is 8,640 requests. Polling intervals can be customized using presets or manually entered durations. Five-second polling is experimental. The actual server-side quota for this endpoint is unknown; the local budget does not represent a verified safe SoundCloud limit. Respect HTTP 429 cooldowns and stop on access restrictions. Do not attempt to bypass service restrictions. The endpoint and Discord RPC behavior may change without notice.
+Persistent logging and the number of log entries retained in memory are configurable. Optional performance settings include skipping unchanged GUI values, reducing repeated inactive Discord checks and limiting background preview rendering. The settings that skip GUI updates or inactive checks are disabled by default.
 Privacy and local storage
-The program stores runtime files in %APPDATA%\SoundCloudPresence\ on Windows:
+Runtime files are stored in %APPDATA%\SoundCloudPresence\:
 File	Contents
-account.dpapi	Access token encrypted for the current Windows user
-settings.json	Application ID, preferences, appearance templates and saved presets
+account.dpapi	Access token encrypted using Windows DPAPI for the current Windows user
+settings.json	Discord application ID, preferences, templates and saved presets
 activity.log / activity.old.log	Local activity and diagnostic logs
 request_usage.json	Request timestamps and cooldown information
 
 
-The access token is sent to SoundCloud for authenticated history requests. Track metadata, artwork URLs and optional links are shared with Discord through its local RPC connection. Public image hosts may receive image requests. Logs, exported settings and layouts may contain personal listening information, custom text or URLs; inspect before sharing. Do not upload these runtime files or credentials. Forget account removes the locally saved credential, but does not revoke the browser session.
+The access token is sent to SoundCloud for authenticated history requests. Track metadata, artwork URLs and optional links are sent to Discord through its local RPC connection. Public image hosts may receive image requests.
+
+Logs, exported settings and layouts may contain listening information or custom text and URLs. Review them before sharing. Do not upload credentials or runtime files. Forget account removes the locally stored token but does not revoke the browser session.
 Troubleshooting
-- Application does not open: Run Install.bat and verify that Python, Tkinter and PyPresence are installed in the Python environment used to launch the application.
-- HTTP 401: The token may have expired or been revoked. Obtain a fresh access token using the in-app help.
-- HTTP 403: Stop polling and verify normal access to SoundCloud before attempting to reconnect.
-- HTTP 429: Wait for the cooldown. Increase the polling interval if necessary.
-- HTTP 200 with unchanged track: The server has not returned a different history entry. Disable Hide unchanged polls and enable the unchanged-polls log filter to see every successful poll.
-- Discord not updating: Check the Discord connection in Accounts, activity privacy settings and Activity log. Publish latest resends the detected track without requesting SoundCloud again.
-- Playback progress is inaccurate: Check the estimated timeline and start offset. SoundCloud history does not provide the current player position.
-- Template changes not appearing: Enable Use custom music template and select Apply template. The live preview is not a published activity.
-- Tray unavailable: Install the optional tray dependencies.
+Issue	Recommended action
+Application does not open	Run Install.bat and verify Python, Tkinter and PyPresence are installed in the same Python environment.
+HTTP 401	Obtain a fresh access token using the in-app authentication instructions.
+HTTP 403	Stop polling and verify normal account access before reconnecting.
+HTTP 429	Wait for the cooldown and increase the polling interval if necessary.
+HTTP 200 with unchanged track	SoundCloud has not returned a different history entry. Enable unchanged-poll logging to view successful requests.
+Discord not updating	Check the connection in Accounts, Discord activity sharing and the Activity log. Try Publish latest.
+Inaccurate playback progress	Check the estimated playback time and start offset. Live player position is not available.
+Template changes not appearing	Enable the custom music template and select Apply template. Preview changes are not published automatically.
+System tray unavailable	Install the optional tray dependencies.
+
+
 Contributing
-Bug reports and suggestions are welcome. Include the application version, Python version, Windows version, reproduction steps and redacted logs. Never include tokens, cookies, passwords or private configuration files.
+Bug reports and suggestions are welcome. Include the application version, Python version, Windows version, reproduction steps and relevant redacted logs. Never include tokens, cookies, passwords or private configuration files.
 Disclaimer
-This is an independent, unofficial project, not affiliated with or endorsed by SoundCloud or Discord. Use only with accounts you are authorized to access and in accordance with the services' applicable terms. The undocumented endpoint can stop working at any time. No guarantee is made about account access or rate limits
+SoundCloud Presence is an independent, unofficial project and is not affiliated with or endorsed by SoundCloud or Discord. Use it only with accounts you are authorized to access and in accordance with the applicable service terms. The undocumented SoundCloud endpoint and Discord RPC behavior may change without notice. No guarantee is made regarding account access, rate limits or identical activity rendering across Discord clients.
