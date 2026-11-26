@@ -62,9 +62,38 @@ def expand_template(text, values):
     return re.sub(pattern,lambda m:str(values.get(m[1],m[0])),text).strip()
 
 
+
+# Listening cards may display large_text as a third body line.
+# Keep album metadata there only, rather than duplicating it in state.
+PREMADE_MUSIC_LAYOUTS = {
+    'Original - song / artist / album': {
+        'name': '%title%', 'details': '%title%', 'state': '%artist%',
+        'large_text': '%distinct_album%', 'status_display': 'Activity name'},
+}
+
+# Recognize only the previous built-in text combinations with their default
+# album tooltip. Do not rewrite personal presets or customized text.
+LEGACY_PROFILE_TEXT = (
+    ('%title%', '%artist%', '%distinct_album%'),
+    ('%title%', '%title%', '%artist%[\n%distinct_album%]'),
+    ('%title%', '%title%', '%artist%[ • %distinct_album%]'),
+)
+
+def upgrade_music_layout(fields):
+    fields=dict(fields)
+    if (tuple(fields.get(k) for k in ('name','details','state')) in LEGACY_PROFILE_TEXT
+            and fields.get('status_display','Activity name')=='Activity name'
+            and fields.get('large_text','%album%') in ('%album%','%distinct_album%')):
+        fields.update(next(iter(PREMADE_MUSIC_LAYOUTS.values())))
+    return fields
+
+
 def music_activity(current, name, use_title, show_album, show_art, show_button, timestamps, template=None):
     key,title,artist,album,art,url,duration=current
-    distinct=album if album and album.strip().casefold() not in (artist.strip().casefold(),title.strip().casefold()) else ''
+    normalize=lambda text: ' '.join((text or '').split()).casefold()
+    distinct=album if album and normalize(album) not in (normalize(artist),normalize(title)) else ''
+    # A duplicate album may leave a vacant body line; retain the song title there.
+    album_suppressed=bool(use_title and show_album and album and not distinct)
     a={'name':(title if use_title else name)[:128] or 'SoundCloud','status_display_type':0,'type':2,'instance':False}
     a['details']=(artist if use_title else title)[:128]
     if use_title and show_album and distinct: a['state']=distinct[:128]
@@ -80,6 +109,7 @@ def music_activity(current, name, use_title, show_album, show_art, show_button, 
         def expand(k):
             return expand_template(template.get(k,''),values)
         a['name']=expand('name')[:128] or 'SoundCloud'
+        album_suppressed=bool(album and not distinct and '%distinct_album%' in template.get('state','') and not expand('state'))
         for k in ('details','state'):
             a.pop(k,None)
             if expand(k): a[k]=expand(k)[:128]
@@ -97,18 +127,45 @@ def music_activity(current, name, use_title, show_album, show_art, show_button, 
             if template.get(prefix+'_visible','Yes')=='Yes' and label and link.startswith(('https://','http://')) and urlsplit(link).netloc:
                 a.setdefault('buttons',[]).append({'label':label[:32],'url':link})
         a['status_display_type']={'Activity name':0,'Details':1,'State':2}.get(template.get('status_display'),0)
-    # Keep the required activity name and the higher-priority details line.
-    # Compare whole visible fields only; do not alter distinct text or tooltips.
-    seen={}
-    for field, display_type in (('name',0),('details',1),('state',2)):
-        value=' '.join(a.get(field,'').split()).casefold()
+    # Discord renders the activity name as a heading, separate from the artwork
+    # and body. Permit the song title in that heading and once in the body.
+    # Keep the established details line; suppress only lower-priority duplicates.
+    title_text=title[:128]
+    title_key=normalize(title_text)
+    heading_key=normalize(a['name'])
+    seen={} if heading_key==title_key else {heading_key:0}
+    removed=False
+    for field, display_type in (('details',1),('state',2)):
+        value=normalize(a.get(field,''))
         if not value: continue
         if value in seen:
             a.pop(field,None)
+            removed=True
             if a['status_display_type']==display_type:
                 a['status_display_type']=seen[value]
         else:
             seen[value]=display_type
+    # Only fill space vacated by sanitization, not an intentionally blank line.
+    # Distinct albums, existing field positions and all artwork remain unchanged.
+    if (album_suppressed or removed) and title_key and heading_key==title_key and title_key not in seen:
+        for field in ('state','details'):
+            if not a.get(field):
+                a[field]=title_text
+                break
+    # The large-image tooltip may also appear as a separate visible album
+    # line on listening cards. Suppress it if already present in the text.
+    assets=a.get('assets',{})
+    cover_text=normalize(assets.get('large_text',''))
+    if cover_text:
+        visible=[a.get(k,'') for k in ('name','details','state')]
+        visible_keys={normalize(v) for v in visible}
+        for text in visible:
+            visible_keys.update(normalize(part) for part in re.split(r'[\n•|]',text))
+        # Some previously imported layouts flatten the artist/album separator.
+        album_key=normalize(album)
+        if cover_text in visible_keys or (cover_text==album_key and any(
+                re.search(r'(?<!\w)'+re.escape(cover_text)+r'(?!\w)',normalize(v)) for v in visible)):
+            assets.pop('large_text',None)
     if timestamps: a['timestamps']=timestamps
     return a
 
@@ -158,7 +215,7 @@ class LatestCommands:
 class Tester:
     def __init__(self, root):
         self.root = root
-        root.title('SoundCloud Presence | V0.28')
+        root.title('SoundCloud Presence | V0.32')
         root.geometry('900x850')
         root.minsize(760, 480)
         root.resizable(True, True)
@@ -174,6 +231,7 @@ class Tester:
         self.timer = None
         self.last = None
         self.block_until = 0
+        self.retry_until = 0  # automatic-only retry delay for transient failures
         self.failures = 0
         self.results = queue.Queue()
         self.rpc_commands = LatestCommands()
@@ -252,7 +310,7 @@ class Tester:
         self.tray_icon=None
         self.closing=False
         self.template_enabled=tk.BooleanVar(value=False)
-        self.template_defaults={'name':'%title%','details':'%artist%','state':'%distinct_album%','large_image':'%artwork%','large_text':'%album%','fallback':'','small_image':'','small_text':'','button_label':'Listen on SoundCloud','button_url':'%url%','status_display':'Activity name','button_visible':'Yes','button2_visible':'No','button2_label':'','button2_url':''}
+        self.template_defaults={'name':'%title%','details':'%title%','state':'%artist%','large_image':'%artwork%','large_text':'%distinct_album%','fallback':'','small_image':'','small_text':'','button_label':'Listen on SoundCloud','button_url':'%url%','status_display':'Activity name','button_visible':'Yes','button2_visible':'No','button2_label':'','button2_url':''}
         self.template_fields={k:tk.StringVar(value=v) for k,v in self.template_defaults.items()}
         self.applied_template=None
         self.music_presets={}
@@ -264,6 +322,7 @@ class Tester:
         self.persist_log=tk.BooleanVar(value=True)
         self.preview_pending=False
         self.last_inactive_signature=None
+        self.inactivity_enabled=tk.BooleanVar(value=True)
         self.inactive_mode=tk.StringVar(value='Keep last song')
         self.inactive_delay=tk.StringVar(value='30')
         self.inactive_label=tk.StringVar(value='Listening inactive')
@@ -284,11 +343,11 @@ class Tester:
     def load_settings(self):
         try:
             data=json.loads(self.config_path.read_text(encoding='utf-8'))
-            for name in ('app_id','activity_name','interval','title_as_name','show_album','show_art','show_button','quiet','adaptive','idle_minutes','idle_interval','show_progress','playback_offset','clear_at_end','end_grace','auto_reconnect','auto_connect','tray_enabled','expiry_notice','daily_budget','template_enabled','inactive_mode','inactive_delay','inactive_label','opt_gui','opt_idle_rpc','opt_background_preview','log_limit','persist_log'):
+            for name in ('app_id','activity_name','interval','title_as_name','show_album','show_art','show_button','quiet','adaptive','idle_minutes','idle_interval','show_progress','playback_offset','clear_at_end','end_grace','auto_reconnect','auto_connect','tray_enabled','expiry_notice','daily_budget','template_enabled','inactivity_enabled','inactive_mode','inactive_delay','inactive_label','opt_gui','opt_idle_rpc','opt_background_preview','log_limit','persist_log'):
                 if name in data: getattr(self,name).set(data[name])
             for k,v in data.get('custom_fields',{}).items():
                 if k in self.custom_fields: self.custom_fields[k].set(v)
-            for k,v in data.get('music_template',{}).items():
+            for k,v in upgrade_music_layout(data.get('music_template',{})).items():
                 if k in self.template_fields: self.template_fields[k].set(v)
             for k,v in data.get('log_filters',{}).items():
                 if k in self.log_filters: self.log_filters[k].set(bool(v))
@@ -300,7 +359,7 @@ class Tester:
     def save_settings(self):
         try:
             self.config_path.parent.mkdir(parents=True,exist_ok=True)
-            data={name:getattr(self,name).get() for name in ('app_id','activity_name','interval','title_as_name','show_album','show_art','show_button','quiet','adaptive','idle_minutes','idle_interval','show_progress','playback_offset','clear_at_end','end_grace','auto_reconnect','auto_connect','tray_enabled','expiry_notice','daily_budget','template_enabled','inactive_mode','inactive_delay','inactive_label','opt_gui','opt_idle_rpc','opt_background_preview','log_limit','persist_log')}
+            data={name:getattr(self,name).get() for name in ('app_id','activity_name','interval','title_as_name','show_album','show_art','show_button','quiet','adaptive','idle_minutes','idle_interval','show_progress','playback_offset','clear_at_end','end_grace','auto_reconnect','auto_connect','tray_enabled','expiry_notice','daily_budget','template_enabled','inactivity_enabled','inactive_mode','inactive_delay','inactive_label','opt_gui','opt_idle_rpc','opt_background_preview','log_limit','persist_log')}
             data['music_template']=self.saved_template.copy()
             data['template_enabled']=self.applied_template is not None
             data['log_filters']={k:v.get() for k,v in self.log_filters.items()}
@@ -337,7 +396,7 @@ class Tester:
         style.map('TNotebook.Tab',background=[('selected',panel)],foreground=[('selected',fg)])
         outer=ttk.Frame(self.root,padding=18); outer.pack(fill='both',expand=True)
         ttk.Label(outer,text='SoundCloud Presence',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(outer,text='V0.28  /  Account playback history → Discord',style='Muted.TLabel').pack(anchor='w',pady=(0,12))
+        ttk.Label(outer,text='V0.32  /  Account playback history → Discord',style='Muted.TLabel').pack(anchor='w',pady=(0,12))
         bar=ttk.Frame(outer); bar.pack(fill='x',pady=(0,12))
         ttk.Label(bar,textvariable=self.status,foreground=accent,wraplength=460).pack(side='left')
         ttk.Label(bar,textvariable=self.rpc_status,style='Muted.TLabel').pack(side='right')
@@ -426,7 +485,7 @@ class Tester:
         ttk.Label(r,text='Rolling 24-hour request budget (0 = unlimited)').pack(side='left')
         ttk.Entry(r,textvariable=self.daily_budget,width=9).pack(side='left',padx=8)
         ttk.Button(r,text='Save',command=self.save_budget).pack(side='left')
-        ttk.Label(settings,text='5-second polling is experimental; the private endpoint has no verified safe limit. Cooldowns apply to manual requests too.',style='Muted.TLabel',wraplength=680).pack(anchor='w')
+        ttk.Label(settings,text='5-second polling is experimental; the private endpoint has no verified safe limit. Manual refresh bypasses local spacing, budget and retry delays, but still counts toward usage. Server cooldowns and access restrictions apply to every request.',style='Muted.TLabel',wraplength=680).pack(anchor='w')
         buttons(settings,[('Save & apply',self.apply_settings,True)])
         heading(tools,'Desktop behavior')
         for label,var in [('Close button minimizes to system tray',self.tray_enabled)]:
@@ -446,18 +505,19 @@ class Tester:
         r=ttk.Frame(timeline); r.pack(fill='x',pady=6)
         ttk.Label(r,text='Start offset',width=24).pack(side='left'); duration(r,self.playback_offset,(-60,-30,-20,-15,-10,-5,0,5,10,15,20,30,60),signed=True)
         ttk.Label(timeline,text='Negative = earlier start / more elapsed; positive = later start / less elapsed.',style='Muted.TLabel',wraplength=630).pack(anchor='w')
-        ttk.Checkbutton(timeline,text='Immediate end-of-track clearing (overrides inactivity below)',variable=self.clear_at_end).pack(anchor='w',pady=(12,0))
+        ttk.Checkbutton(timeline,text='End-of-track clearing (when inactivity is enabled)' ,variable=self.clear_at_end).pack(anchor='w',pady=(12,0))
         r=ttk.Frame(timeline); r.pack(fill='x',pady=6)
         ttk.Label(r,text='End grace period',width=24).pack(side='left'); duration(r,self.end_grace,(0,10,20,30,60,120))
         ttk.Label(timeline,text='With progress enabled, completed tracks keep their original full progress bar until the selected clearing action. Missing timing data clears the activity rather than starting a counter. Phone pauses and seeking cannot be detected.',style='Muted.TLabel',wraplength=630).pack(anchor='w',pady=8)
         heading(timeline,'Inactivity after estimated end')
+        ttk.Checkbutton(timeline,text='Enable inactivity actions (including end-of-track clearing)',variable=self.inactivity_enabled,command=self.toggle_inactivity).pack(anchor='w',pady=(0,6))
         r=ttk.Frame(timeline); r.pack(fill='x',pady=3)
         ttk.Combobox(r,textvariable=self.inactive_mode,values=('Keep last song','Hide timer','Mark inactive','Clear presence'),state='readonly',width=22).pack(side='left')
         r=ttk.Frame(timeline); r.pack(fill='x',pady=4)
         ttk.Label(r,text='Delay after estimated end',width=24).pack(side='left'); duration(r,self.inactive_delay,(0,15,30,60,300,900,3600))
         r=ttk.Frame(timeline); r.pack(fill='x',pady=3)
         ttk.Label(r,text='Inactive text',width=24).pack(side='left'); ttk.Entry(r,textvariable=self.inactive_label).pack(side='left',fill='x',expand=True,padx=8)
-        ttk.Label(timeline,text='Uses estimated song end, not actual pause. Clear-at-end takes priority. With progress enabled, Hide timer clears the card instead (Discord may otherwise show its own timer). Mark inactive keeps the progress bar. New plays restore presence.',wraplength=650,style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(timeline,text='When disabled, both inactivity actions and end-of-track clearing are skipped; your settings are retained. Uses estimated song end, not actual pause. Clear-at-end takes priority when enabled. With progress enabled, Hide timer clears the card instead (Discord may otherwise show its own timer). Mark inactive keeps the progress bar. New plays restore presence.',wraplength=650,style='Muted.TLabel').pack(anchor='w')
         buttons(timeline,[('Apply inactivity settings',self.apply_settings,True)])
         appearance=ttk.Frame(tabs,padding=12); tabs.add(appearance,text='Appearance')
         appearance_nav=ttk.Notebook(appearance); appearance_nav.pack(fill='both',expand=True)
@@ -564,6 +624,13 @@ class Tester:
         actions=ttk.Frame(parent); actions.pack(fill='x',pady=(0,5))
         for label,cmd in [('Apply template',self.apply_template),('Revert',self.revert_template),('Restore defaults',self.reset_template)]:
             ttk.Button(actions,text=label,command=cmd,style='Accent.TButton' if label=='Apply template' else 'TButton').pack(side='left',padx=(0,5))
+        profiles=ttk.Frame(parent); profiles.pack(fill='x',pady=(0,7))
+        ttk.Label(profiles,text='Premade layout').pack(anchor='w',pady=(0,2))
+        profile_row=ttk.Frame(profiles); profile_row.pack(fill='x')
+        self.premade_music_name=tk.StringVar(value=next(iter(PREMADE_MUSIC_LAYOUTS)))
+        ttk.Combobox(profile_row,textvariable=self.premade_music_name,values=tuple(PREMADE_MUSIC_LAYOUTS),state='readonly').pack(side='left',fill='x',expand=True)
+        ttk.Button(profile_row,text='Load layout',command=self.load_premade_music_layout).pack(side='left',padx=(6,0))
+        ttk.Label(profiles,text='Loads song, artist and album formatting. Keeps images and buttons. Preview, then Apply template.',style='Muted.TLabel',wraplength=650).pack(anchor='w',pady=(3,0))
         body=ttk.Frame(parent); body.pack(fill='both',expand=True)
         preview_host=ttk.Frame(body,width=300); preview_host.pack(side='right',fill='y',padx=(8,0)); preview_host.grid_propagate(False)
         preview=self.scroll_page(preview_host)
@@ -571,7 +638,7 @@ class Tester:
         self.preview_mode=tk.StringVar(value='Music')
         ttk.Combobox(preview,textvariable=self.preview_mode,values=('Music','Custom presence','Inactive music','Basic music'),state='readonly',width=21).pack(fill='x',pady=4)
         self.preview_canvas=tk.Canvas(preview,width=270,height=250,bg='#232428',highlightthickness=0); self.preview_canvas.pack(pady=4)
-        ttk.Label(preview,text='Preview only. Apply to publish. Artwork is shown as a placeholder.',wraplength=270,style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(preview,text='Preview only. Apply to publish. Artwork is a placeholder; Discord may show the album as a tooltip instead.',wraplength=270,style='Muted.TLabel').pack(anchor='w')
         host=ttk.Frame(body); host.pack(side='left',fill='both',expand=True)
         editor=self.scroll_page(host)
         self.preview_counts={}; self.template_entries={}; self.last_template_entry=None
@@ -597,7 +664,7 @@ class Tester:
         ttk.Button(r,text='Insert',command=insert).pack(side='right')
         ttk.Label(editor,text='Select a text field first. Optional groups such as [%album% • ] disappear if metadata is missing.',wraplength=250,style='Muted.TLabel').pack(anchor='w',pady=4)
         heading('Artwork and tooltips')
-        for k,label in [('large_image','Cover URL / key'),('large_text','Cover tooltip'),('fallback','Fallback artwork'),('small_image','Small image URL / key'),('small_text','Small tooltip')]: field(k,label)
+        for k,label in [('large_image','Cover URL / key'),('large_text','Album / cover tooltip'),('fallback','Fallback artwork'),('small_image','Small image URL / key'),('small_text','Small tooltip')]: field(k,label)
         for prefix,label in [('button','Link button 1'),('button2','Link button 2')]:
             heading(label)
             ttk.Combobox(editor,textvariable=self.template_fields[prefix+'_visible'],values=('Yes','No'),state='readonly',width=8).pack(anchor='w')
@@ -628,6 +695,15 @@ class Tester:
         for k,v in self.template_fields.items(): v.set(fields.get(k,self.template_defaults[k]))
         self.template_enabled.set(bool(data.get('enabled',True)))
         self.draw_preview()
+    def load_premade_music_layout(self):
+        profile=PREMADE_MUSIC_LAYOUTS.get(self.premade_music_name.get())
+        if profile is None: return
+        data=self.layout_data()
+        data['enabled']=True
+        data['fields'].update(profile)
+        self.preview_mode.set('Music')
+        self.set_layout(data)
+
     def revert_template(self):
         self.set_layout({'enabled':self.applied_template is not None,'fields':self.saved_template})
     def refresh_music_presets(self):
@@ -700,14 +776,19 @@ class Tester:
         dirty=self.layout_data()!={'enabled':self.applied_template is not None,'fields':self.saved_template}
         self.dirty_label.configure(text=('Unapplied changes' if dirty else 'Layout applied') if self.template_enabled.get() else 'Template disabled — preview only')
         key,title,artist,album,art,url,duration=current
-        distinct=album if album and album.strip().casefold() not in (artist.strip().casefold(),title.strip().casefold()) else ''
+        normalize=lambda text: ' '.join((text or '').split()).casefold()
+        distinct=album if album and normalize(album) not in (normalize(artist),normalize(title)) else ''
         try: seconds=int(duration)//1000
         except (ValueError,TypeError): seconds=0
         values=dict(title=title,artist=artist,album=album,distinct_album=distinct,artwork=art or '',url=url or '',duration='%d:%02d'%(seconds//60,seconds%60),app=self.activity_name.get())
         for k,(widget,limit) in self.preview_counts.items():
             n=len(expand_template(self.template_fields[k].get(),values)); widget.configure(text='%d/%d'%(n,limit),foreground='#f87171' if n>limit else '#a0a0a0')
         fg='#f2f3f5'; muted='#b5bac1' 
-        c.create_text(12,15,text={0:'PLAYING',2:'LISTENING TO',3:'WATCHING',5:'COMPETING IN'}.get(a.get('type'),'ACTIVITY'),anchor='nw',fill=muted,font=('Segoe UI',9,'bold'))
+        heading={0:'PLAYING',2:'LISTENING TO',3:'WATCHING',5:'COMPETING IN'}.get(a.get('type'),'ACTIVITY')
+        if mode!='Custom presence':
+            heading='Listening to '+a.get('name','SoundCloud')
+            if len(heading)>37: heading=heading[:37]+'…'
+        c.create_text(12,15,text=heading,anchor='nw',fill=muted,font=('Segoe UI',9,'bold'))
         assets=a.get('assets',{}); x=12
         if assets.get('large_image'):
             c.create_rectangle(12,42,76,106,fill='#41434a',outline=''); c.create_text(44,74,text='♫',fill=fg,font=('Segoe UI',25)); x=86
@@ -715,10 +796,18 @@ class Tester:
         elif assets.get('small_image'):
             c.create_oval(12,42,36,66,fill='#5865f2',outline=''); x=44
         y=42
-        for k in ('name','details','state'):
+        for k in (('name','details','state') if mode=='Custom presence' else ('details','state')):
             if a.get(k):
                 text=a[k]; limit=25 if x>12 else 35
-                c.create_text(x,y,text=text[:limit]+('…' if len(text)>limit else ''),anchor='nw',fill=fg if k=='name' else muted,font=('Segoe UI',10,'bold' if k=='name' else 'normal')); y+=21
+                prominent=k==('name' if mode=='Custom presence' else 'details')
+                # Preserve manually entered line breaks in the music preview;
+                # actual Discord clients may render the state as a single line.
+                lines=text.splitlines() if mode!='Custom presence' else [text]
+                for line in lines:
+                    c.create_text(x,y,text=line[:limit]+('…' if len(line)>limit else ''),anchor='nw',fill=fg if prominent else muted,font=('Segoe UI',10,'bold' if prominent else 'normal')); y+=21
+        if mode!='Custom presence' and assets.get('large_text'):
+            text=assets['large_text']; limit=25 if x>12 else 35
+            c.create_text(x,y,text=text[:limit]+('…' if len(text)>limit else ''),anchor='nw',fill=muted,font=('Segoe UI',10)); y+=21
         ts=a.get('timestamps',{}); y=max(y+8,116)
         if 'end' in ts and ts['end']>ts['start']:
             total=(ts['end']-ts['start'])//1000; elapsed=max(0,min(total,(now-ts['start'])//1000)); frac=elapsed/max(1,total)
@@ -729,6 +818,7 @@ class Tester:
             c.create_text(12,y,text='Elapsed time',anchor='nw',fill='#23a55a'); y+=25
         for button in a.get('buttons',[]):
             c.create_rectangle(12,y,258,y+30,fill='#4e5058',outline=''); c.create_text(135,y+15,text=button['label'][:32],fill=fg,font=('Segoe UI',10,'bold')); y+=35
+        c.configure(height=max(250,y+8))
 
     def connect_account(self):
         if self.custom_mode:
@@ -903,7 +993,7 @@ class Tester:
             messagebox.showwarning('Request budget','Enter nonnegative whole numbers for budget and inactivity delay.',parent=self.root); return
         self.save_settings()
         self.log('SoundCloud: request budget saved')
-        if self.running and not self.busy: self.schedule(max(self.poll_seconds(),self.block_until-time.monotonic(),self.budget_delay()))
+        if self.running and not self.busy: self.schedule(max(self.poll_seconds(),self.block_until-time.monotonic(),self.retry_until-time.monotonic(),self.budget_delay()))
 
     def apply_settings(self):
         if not all(validate() for validate in self.duration_validators):
@@ -915,7 +1005,7 @@ class Tester:
         self.save_settings();
         if not self.custom_mode: self.rpc_publish()
         self.log('Settings applied')
-        if self.running and not self.busy: self.schedule(max(self.poll_seconds(),self.block_until-time.monotonic()))
+        if self.running and not self.busy: self.schedule(max(self.poll_seconds(),self.block_until-time.monotonic(),self.retry_until-time.monotonic()))
     def callback_error(self,kind,error,tb):
         self.log("Application: "+kind.__name__+": "+self.safe_error(error,self.normalized_token()))
     def copy_log(self):
@@ -995,23 +1085,26 @@ class Tester:
         if self.restricted:
             self.running=False; self.status.set('Access restricted — verify in Accounts'); self.log('SoundCloud: blocked after HTTP 403; use Connect / Save only after access is restored'); return
         budget_wait=self.budget_delay()
-        if budget_wait>0:
+        if not manual and budget_wait>0:
             self.status.set('Daily request budget reached'); self.log('SoundCloud: rolling 24-hour request budget reached; next slot in %d seconds'%math.ceil(budget_wait)); self.schedule(budget_wait); return
         remaining=self.block_until-time.monotonic()
         if remaining>0:
             self.status.set('Backoff: retry in %d seconds' % (remaining+1)); self.log('SoundCloud: request blocked by cooldown; retry in %d seconds' % (remaining+1)); self.schedule(remaining+1); return
+        if not manual and self.retry_until>time.monotonic():
+            wait=self.retry_until-time.monotonic()
+            self.status.set('Automatic retry in %d seconds'%math.ceil(wait)); self.schedule(wait); return
         token=self.token.get().strip()
         if token.lower().startswith('oauth '): token=token[6:].strip()
         if not token or any(c.isspace() for c in token):
             self.running=False; self.status.set('Enter a valid OAuth token'); self.log('SoundCloud: missing or malformed token; request not sent'); return
         if (token_expiry(token) or float('inf'))<=time.time():
             self.resume_on_auth=self.running; self.running=False; self.status.set('Token expired; reconnect SoundCloud'); self.log('SoundCloud: token expired; request not sent'); self.rpc_clear(); return
-        if self.request_times and time.time()-self.request_times[-1]<5:
+        if not manual and self.request_times and time.time()-self.request_times[-1]<5:
             wait=max(0.1,5-(time.time()-self.request_times[-1]))
-            if manual: self.log('SoundCloud: minimum request spacing; retry in %.1fs'%wait)
             if self.running: self.schedule(wait)
-            elif manual: self.status.set('Please retry manual refresh in %.1fs'%wait)
             return
+        if manual and budget_wait>0:
+            self.log("SoundCloud: manual refresh overrides local daily budget; automatic polling remains budget-limited")
         self.request_times.append(time.time()); self.save_usage()
         self.request_started=time.monotonic()
         self.request_manual=manual
@@ -1072,7 +1165,7 @@ class Tester:
                         self.log('SoundCloud authorization verified')
                         if self.rpc_enabled and self.requested_presence==('clear',): self.last=None
                     self.rejected_token=None
-                    self.failures=0
+                    self.failures=0; self.retry_until=0
                     try:
                         items=data['collection']
                         if not isinstance(items,list): raise TypeError('collection is not a list')
@@ -1118,13 +1211,15 @@ class Tester:
                                 except (ValueError,TypeError,OverflowError): pass
                         self.block_until=max(self.block_until,time.monotonic()+delay); self.save_usage(); self.status.set('Rate limited; backoff %d seconds'%delay); self.log('SoundCloud: rate limited; cooldown %d seconds'%delay); self.schedule(delay)
                     elif code>=500:
+                        if retry:
+                            self.block_until=max(self.block_until,time.monotonic()+self.reset_delay({'Retry-After':retry})); self.save_usage()
                         self.retry('Server error')
                     else:
                         self.running=False; self.status.set('HTTP %d; polling stopped'%code)
                 else: self.retry('SoundCloud: request failed: '+data)
                 if self.manual_queued:
                     self.manual_queued=False
-                    if kind=='ok': self.fetch(manual=True)
+                    if kind=='ok' or kind=='error' or (kind=='http' and data[0]>=500): self.fetch(manual=True)
                     else: self.log('SoundCloud: queued refresh cancelled after request error; see above')
         except queue.Empty: pass
         self.consume_rpc()
@@ -1217,7 +1312,7 @@ class Tester:
         try: grace=max(0,int(self.end_grace.get()))
         except ValueError: grace=30
         bounds=playback_bounds(self.current[0][1],self.current[6],offset)
-        clear,timestamps=playback_state(bounds,int(time.time()*1000),self.show_progress.get(),self.clear_at_end.get(),grace)
+        clear,timestamps=playback_state(bounds,int(time.time()*1000),self.show_progress.get(),self.inactivity_enabled.get() and self.clear_at_end.get(),grace)
         if self.is_inactive(bounds):
             mode=self.inactive_mode.get()
             # Hiding timestamps can make Discord display an elapsed counter.
@@ -1226,7 +1321,14 @@ class Tester:
                 clear=True; timestamps=None
         return bounds,clear,timestamps
 
+    def toggle_inactivity(self):
+        self.save_settings()
+        self.last_inactive_signature=None
+        if not self.custom_mode: self.rpc_update()
+        self.log("Inactivity actions "+("enabled" if self.inactivity_enabled.get() else "disabled"))
+
     def is_inactive(self,bounds):
+        if not self.inactivity_enabled.get(): return False
         try: delay=max(0,int(self.inactive_delay.get()))
         except ValueError: delay=30
         return bool(bounds and int(time.time()*1000)>=bounds[1]+delay*1000)
@@ -1357,7 +1459,7 @@ class Tester:
         usage='\nRequests: %d / min | %d / hour | %d / 24h'%(sum(t>wall-60 for t in self.request_times),sum(t>wall-3600 for t in self.request_times),len(self.request_times))
         usage+='\n24h budget: '+self.daily_budget.get()+' | '+('access restricted' if self.restricted else 'No access restriction recorded')
         usage+='\nRate headers: '+('; '.join(k+': '+v for k,v in self.limit_headers.items()) or 'Not supplied by server')
-        self.diagnostics.set('Last successful HTTP response: '+last+'\nLast request duration: '+('%.2f s'%self.last_latency if self.last_latency is not None else 'Unknown')+'\nNext poll: '+next_poll+'\nCurrent interval: %ds | Failed requests this session: %d'%(self.poll_seconds(),self.total_errors)+'\nCooldown remaining: %ds'%max(0,int(self.block_until-now))+'\nLast Discord acknowledgment: '+('%.0f ms'%(self.rpc_last_ack*1000) if self.rpc_last_ack is not None else 'Unknown')+usage)
+        self.diagnostics.set('Last successful HTTP response: '+last+'\nLast request duration: '+('%.2f s'%self.last_latency if self.last_latency is not None else 'Unknown')+'\nNext poll: '+next_poll+'\nCurrent interval: %ds | Failed requests this session: %d'%(self.poll_seconds(),self.total_errors)+'\nServer cooldown: %ds | Automatic retry: %ds'%(max(0,int(self.block_until-now)),max(0,int(self.retry_until-now)))+'\nLast Discord acknowledgment: '+('%.0f ms'%(self.rpc_last_ack*1000) if self.rpc_last_ack is not None else 'Unknown')+usage)
         expiry=token_expiry(self.normalized_token())
         if self.expiry_notice.get() and expiry and 0<expiry-time.time()<=1800 and self.notice_key!=expiry:
             self.notice_key=expiry; self.log('Account: access token expires within 30 minutes')
@@ -1433,8 +1535,9 @@ class Tester:
         self.save_settings(); self.running=False; self.cancel(); self.rpc_commands.put(('quit',None))
         self.root.after(500,self.root.destroy)
     def retry(self,msg):
-        self.failures+=1; delay=min(300,30*2**min(self.failures-1,4)); self.block_until=time.monotonic()+delay
-        self.log(msg+'; cooldown %d seconds'%delay); self.status.set(msg+'; retry in %d seconds'%delay); self.schedule(delay)
+        self.failures+=1; delay=min(300,30*2**min(self.failures-1,4)); self.retry_until=time.monotonic()+delay
+        delay=max(delay,self.block_until-time.monotonic())
+        self.log(msg+'; automatic retry in %d seconds'%delay); self.status.set(msg+'; retry in %d seconds'%delay); self.schedule(delay)
 
 if __name__=='__main__':
     root=tk.Tk(); Tester(root); root.mainloop()
