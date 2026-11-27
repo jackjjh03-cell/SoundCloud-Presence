@@ -455,7 +455,7 @@ class Tester:
         for label,cmd in [('Load',self.load_preset),('Save as',self.save_preset),('Delete',self.delete_preset)]:
             ttk.Button(r,text=label,command=cmd).pack(side='left',padx=3)
         heading(account,'SoundCloud access token')
-        ttk.Label(account,text='Paste your current oauth_token below. No browser extension required.',style='Muted.TLabel',wraplength=650).pack(anchor='w',pady=(0,8))
+        ttk.Label(account,text='Paste your current oauth_token below.',style='Muted.TLabel',wraplength=650).pack(anchor='w',pady=(0,8))
         r=ttk.Frame(account); r.pack(fill='x')
         self.token_entry=ttk.Entry(r,textvariable=self.token,show='*'); self.token_entry.pack(side='left',fill='x',expand=True)
         ttk.Checkbutton(r,text='Show',variable=self.show_token,command=lambda:self.token_entry.configure(show='' if self.show_token.get() else '*')).pack(side='left',padx=8)
